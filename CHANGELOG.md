@@ -1,26 +1,12 @@
-# RabbitMQ specific components for Pip.Services in .NET Changelog
+# <img src="https://uploads-ssl.webflow.com/5ea5d3315186cf5ec60c3ee4/5edf1c94ce4c859f2b188094_logo.svg" alt="Pip.Services Logo" width="200"> <br/> Kafka components for .NET Changelog
 
-## <a name="3.1.1"></a> 3.1.1 (2020-06-29)
+## <a name="3.0.0"></a> 3.0.0 (2020-08-10)
 
-### Features
-* Implemented support backward compatibility
-
-## <a name="3.1.0"></a> 3.1.0 (2020-05-26)
-
-### Breaking Changes
-* Migrated to .NET Core 3.1
-
-## <a name="3.0.0-3.0.4"></a> 3.0.0-3.0.4 (2020-01-13)
-
-Initial public release for Pip.Services 3.0
+Initial release
 
 ### Features
-* **build** RabbitMQ queues factory
-* **messaging** RabbitMQ queues
 
-### Breaking Changes
-* Added 'pip-services' descriptors
-
-### Bug Fixes
-No fixes in this version
+* Added DefaultKafkaFactory
+* Added KafkaConnectionResolver
+* Added KafkaMessageQueue
 
