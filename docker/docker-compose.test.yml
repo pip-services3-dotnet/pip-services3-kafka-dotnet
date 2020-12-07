@@ -21,10 +21,10 @@ services:
     depends_on:
       - zookeeper
 
-  # test:
-  #   build:
-  #     context: ..
-  #     dockerfile: docker/Dockerfile.test
-  #   image: ${IMAGE:-pipdevs/test}
-  #   depends_on:
-  #     - kafka
+  test:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.test
+    image: ${IMAGE:-pipdevs/test}
+    depends_on:
+      - kafka
