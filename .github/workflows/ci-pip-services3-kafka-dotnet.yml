@@ -42,6 +42,6 @@ jobs:
 
     ############# Clear #############
 
-  - name: Clean up
-    uses: pip-devops/actions/dotnet/clear@v1
+    - name: Clean up
+      uses: pip-devops/actions/dotnet/clear@v1
     
