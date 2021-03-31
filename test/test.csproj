@@ -23,4 +23,8 @@
   <ItemGroup>
     <ProjectReference Include="..\src\src.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <Folder Include="Connect\" />
+    <Folder Include="Build\" />
+  </ItemGroup>
 </Project>

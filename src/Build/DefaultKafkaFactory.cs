@@ -9,12 +9,8 @@ namespace PipServices3.Kafka.Build
     /// </summary>
     public class DefaultKafkaFactory: Factory
     {
-        public static Descriptor Descriptor = new Descriptor("pip-services", "factory", "kafka", "default", "1.0");
-        public static Descriptor Descriptor3 = new Descriptor("pip-services3", "factory", "kafka", "default", "1.0");
-        public static Descriptor KafkaMessageQueueFactoryDescriptor = new Descriptor("pip-services", "factory", "message-queue", "kafka", "1.0");
-        public static Descriptor KafkaMessageQueueFactory3Descriptor = new Descriptor("pip-services3", "factory", "message-queue", "kafka", "1.0");
-        public static Descriptor KafkaMessageQueueDescriptor = new Descriptor("pip-services", "message-queue", "kafka", "*", "1.0");
-        public static Descriptor KafkaMessageQueue3Descriptor = new Descriptor("pip-services3", "message-queue", "kafka", "*", "1.0");
+        private static Descriptor KafkaMessageQueueFactoryDescriptor = new Descriptor("pip-services", "queue-factory", "kafka", "*", "1.0");
+        private static Descriptor KafkaMessageQueueDescriptor = new Descriptor("pip-services", "message-queue", "kafka", "*", "1.0");
 
         /// <summary>
         /// Create a new instance of the factory.
@@ -22,9 +18,11 @@ namespace PipServices3.Kafka.Build
         public DefaultKafkaFactory()
         {
             RegisterAsType(KafkaMessageQueueFactoryDescriptor, typeof(KafkaMessageQueueFactory));
-            RegisterAsType(KafkaMessageQueueFactory3Descriptor, typeof(KafkaMessageQueueFactory));
-            RegisterAsType(KafkaMessageQueueDescriptor, typeof(KafkaMessageQueue));
-            RegisterAsType(KafkaMessageQueue3Descriptor, typeof(KafkaMessageQueue));
+            Register(KafkaMessageQueueDescriptor, (locator) => {
+                Descriptor descriptor = locator as Descriptor;
+                var name = descriptor != null ? descriptor.Name : null;
+                return new KafkaMessageQueue(name);
+            });
         }
     }
 }

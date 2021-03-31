@@ -6,10 +6,10 @@
     <AssemblyName>PipServices3.Kafka</AssemblyName>
     <ApplicationIcon />
     <Win32Resource />
-    <Version>3.1.1</Version>
-    <Authors>Sergey Seroukhov, Denis Kuznetsov</Authors>
+    <Version>3.0.0</Version>
+    <Authors>Sergey Seroukhov</Authors>
     <Copyright>Conceptual Vision Consulting LLC. 2017-2020</Copyright>
-    <Description>Kafka components for Pip.Services in .NET</Description>
+    <Description>Kafka messaging for Pip.Services in .NET</Description>
     <Company>Conceptual Vision Consulting LLC.</Company>
     <Product>PipServices3.Kafka</Product>
     <PackageLicenseUrl>http://opensource.org/licenses/MIT</PackageLicenseUrl>
@@ -20,10 +20,13 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Confluent.Kafka" Version="1.5.0" />
-    <PackageReference Include="PipServices3.Commons" Version="3.1.1" />
-    <PackageReference Include="PipServices3.Components" Version="3.1.1" />
-    <PackageReference Include="PipServices3.Messaging" Version="3.1.1" />
+    <PackageReference Include="PipServices3.Commons" Version="3.1.2" />
+    <PackageReference Include="PipServices3.Components" Version="3.1.4" />
+    <PackageReference Include="PipServices3.Messaging" Version="3.2.2" />
+    <PackageReference Include="Confluent.Kafka" Version="1.6.3" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Folder Include="Connect\" />
+  </ItemGroup>
 </Project>
