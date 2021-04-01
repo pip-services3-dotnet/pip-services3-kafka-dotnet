@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Confluent.Kafka;
+using Confluent.Kafka.Admin;
 using PipServices3.Commons.Config;
 using PipServices3.Commons.Errors;
 using PipServices3.Commons.Refer;
@@ -61,7 +62,7 @@ namespace PipServices3.Kafka.Connect
         protected IProducer<byte[], byte[]> _connection;
 
         // Kafka admin client object
-        protected object _adminClient;
+        protected IAdminClient _adminClient;
 
         // Topic subscriptions
         protected List<KafkaSubscription> _subscriptions = new List<KafkaSubscription>();
@@ -130,7 +131,6 @@ namespace PipServices3.Kafka.Connect
         public async Task OpenAsync(string correlationId)
         {
             var options = await _connectionResolver.ResolveAsync(correlationId);
-
             var uri = options.GetAsString("servers");
 
             var opts = new ProducerConfig
@@ -211,6 +211,7 @@ namespace PipServices3.Kafka.Connect
             {
                 _connection = null;
                 _subscriptions.Clear();
+                _adminClient = null;
 
                 _logger.Debug(correlationId, "Disconnected from Kafka broker");
             }
@@ -223,13 +224,74 @@ namespace PipServices3.Kafka.Connect
             return _connection;
         }
 
+        private async Task<IAdminClient> CreateAdminClientAsync()
+        {
+            if (_adminClient != null)
+            {
+                return _adminClient;
+            }
+
+            var options = await _connectionResolver.ResolveAsync(null);
+            var uri = options.GetAsString("servers");
+
+            lock (_lock)
+            {
+                if (_adminClient != null)
+                {
+                    return _adminClient;
+                }
+
+                var opts = new AdminClientConfig
+                {
+                    ClientId = _clientId,
+                    BootstrapServers = uri,
+                };
+
+                var username = options.GetAsString("username");
+                if (!string.IsNullOrEmpty(username))
+                {
+                    opts.SaslUsername = username;
+                    var password = options.GetAsString("password");
+                    opts.SaslPassword = password;
+
+                    var mechanism = options.GetAsString("mechanism");
+                    switch (mechanism)
+                    {
+                        case "scram-sha-256":
+                            opts.SaslMechanism = SaslMechanism.ScramSha256;
+                            break;
+                        case "scram-sha-512":
+                            opts.SaslMechanism = SaslMechanism.ScramSha512;
+                            break;
+                        default:
+                            opts.SaslMechanism = SaslMechanism.Plain;
+                            break;
+                    }
+                }
+
+                _adminClient = new AdminClientBuilder(opts).Build();
+                return _adminClient;
+            }
+        }
+
         /// <summary>
         /// Reads names of available queues or topics.
         /// </summary>
         /// <returns>A list with queue names</returns>
         public async Task<List<string>> ReadQueueNamesAsync()
         {
-            return await Task.FromResult(new List<string>());
+            CheckOpen();
+
+            var client = await CreateAdminClientAsync();
+            var metadata = client.GetMetadata(TimeSpan.FromMilliseconds(30000));
+
+            var topics = new List<string>();
+            foreach (var topic in metadata.Topics)
+            {
+                topics.Add(topic.Topic);
+            }
+
+            return topics;
         }
 
         /// <summary>
@@ -238,7 +300,13 @@ namespace PipServices3.Kafka.Connect
         /// <param name="name">A name of the queue to be created</param>
         public async Task CreateQueueAsync(string name)
         {
-            await Task.Delay(0);
+            CheckOpen();
+
+            var client = await CreateAdminClientAsync();
+
+            await client.CreateTopicsAsync(new TopicSpecification[]{
+                new TopicSpecification { Name = name, NumPartitions = 1, ReplicationFactor = 1 }
+            });
         }
 
         /// <summary>
@@ -247,7 +315,11 @@ namespace PipServices3.Kafka.Connect
         /// <param name="name">A name of the queue to be deleted</param>
         public async Task DeleteQueueAsync(string name)
         {
-            await Task.Delay(0);
+            CheckOpen();
+
+            var client = await CreateAdminClientAsync();
+
+            await client.DeleteTopicsAsync(new string[]{ name });
         }
 
         private void CheckOpen()

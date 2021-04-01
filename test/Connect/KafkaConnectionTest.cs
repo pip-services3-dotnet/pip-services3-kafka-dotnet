@@ -58,5 +58,20 @@ namespace PipServices3.Kafka.Connect
             }
         }
 
+        [Fact]
+        public async Task TestConnectionGetTopicsAsync()
+        {
+            if (_enabled)
+            {
+                await _connection.OpenAsync(null);
+
+                var topics = await _connection.ReadQueueNamesAsync();
+                Assert.NotNull(topics);
+                Assert.True(topics.Count > 0);
+
+                await _connection.CloseAsync(null);
+            }
+        }
+
     }
 }
