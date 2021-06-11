@@ -49,7 +49,7 @@ namespace PipServices3.Kafka.Connect
                 return;
             }
 
-            var protocol = connection.GetProtocol("tcp");
+            var protocol = connection.GetProtocolWithDefault("tcp");
             if (string.IsNullOrEmpty(protocol))
             {
                 throw new ConfigException(correlationId, "NO_PROTOCOL", "Connection protocol is not set");
