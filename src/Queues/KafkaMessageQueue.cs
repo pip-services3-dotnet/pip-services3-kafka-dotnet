@@ -285,7 +285,7 @@ namespace PipServices3.Kafka.Queues
             {
                 msg.Key = Encoding.UTF8.GetBytes(message.MessageId);
             }
-            msg.Value = message.MessageBuffer;
+            msg.Value = message.Message;
 
             return msg;
         }
