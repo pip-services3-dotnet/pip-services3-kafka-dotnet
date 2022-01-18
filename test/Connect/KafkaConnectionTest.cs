@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using PipServices3.Commons.Config;
 using Xunit;
@@ -64,12 +65,15 @@ namespace PipServices3.Kafka.Connect
             if (_enabled)
             {
                 await _connection.OpenAsync(null);
+                Assert.True(_connection.IsOpen());
+                Assert.NotNull(_connection.GetConnection());
 
                 var topics = await _connection.ReadQueueNamesAsync();
-                Assert.NotNull(topics);
-                Assert.True(topics.Count > 0);
+                Assert.IsType<List<string>>(topics);
 
                 await _connection.CloseAsync(null);
+                Assert.False(_connection.IsOpen());
+                Assert.Null(_connection.GetConnection());
             }
         }
 
