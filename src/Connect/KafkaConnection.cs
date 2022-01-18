@@ -68,6 +68,8 @@ namespace PipServices3.Kafka.Connect
         protected List<KafkaSubscription> _subscriptions = new List<KafkaSubscription>();
         protected object _lock = new object();
 
+        private List<bool> _autocommitSubscriptions = new List<bool>();
+
         // Connection options
         private string _clientId;
         private int _logLevel = 1;
@@ -196,7 +198,7 @@ namespace PipServices3.Kafka.Connect
                 foreach (var subscription in _subscriptions)
                 {
                     try
-                    {
+                    {   
                         subscription.Token.Cancel();
                         subscription.Handler.Unsubscribe();
                         subscription.Handler.Close();
@@ -212,6 +214,7 @@ namespace PipServices3.Kafka.Connect
                 _connection = null;
                 _subscriptions.Clear();
                 _adminClient = null;
+                _autocommitSubscriptions.Clear();
 
                 _logger.Debug(correlationId, "Disconnected from Kafka broker");
             }
@@ -361,8 +364,12 @@ namespace PipServices3.Kafka.Connect
 
             if (config != null)
             {
+                _autocommitSubscriptions.Add(config.EnableAutoCommit ?? false);
                 opts.EnableAutoCommit = config.EnableAutoCommit;
                 opts.AutoCommitIntervalMs = config.AutoCommitIntervalMs;
+            } else
+            {
+                _autocommitSubscriptions.Add(false);
             }
 
             var username = options.GetAsString("username");
@@ -457,6 +464,7 @@ namespace PipServices3.Kafka.Connect
                     {
                         deletedSubscription = subscription;
                         _subscriptions.RemoveAt(index);
+                        _autocommitSubscriptions.RemoveAt(index);
                         break;
                     }
                 }
@@ -471,6 +479,64 @@ namespace PipServices3.Kafka.Connect
             }
 
             await Task.Delay(0);
+        }
+
+        /// <summary>
+        /// Commit a message offset.
+        /// </summary>
+        /// <param name="topic">a topic name</param>
+        /// <param name="groupId">(optional) a consumer group id</param>
+        /// <param name="partition">a partition number</param>
+        /// <param name="offset">a message offset</param>
+        /// <param name="listener">a message listener</param>
+        /// <returns></returns>
+        public void Commit(string topic, string groupId, int partition, long offset, IKafkaMessageListener listener)
+        {
+            // Check for open connection
+            this.CheckOpen();
+
+            // Find the subscription
+            var subscription = _subscriptions.Find((s) => s.Topic == topic && s.GroupId == groupId && s.Listener == listener);
+            var autocommit = _autocommitSubscriptions[_subscriptions.IndexOf(subscription)];
+            if (subscription == null || autocommit)
+                return;
+
+            // Commit the offset
+            var topicOffset = new TopicPartitionOffset(
+                new TopicPartition(topic, new Partition(partition)),
+                new Offset(offset)
+            );
+
+            subscription.Handler.Commit(offsets: new List<TopicPartitionOffset> { topicOffset });
+        }
+
+        /// <summary>
+        /// Seek a message offset.
+        /// </summary>
+        /// <param name="topic">a topic name</param>
+        /// <param name="groupId">(optional) a consumer group id</param>
+        /// <param name="partition">a partition number</param>
+        /// <param name="offset">a message offset</param>
+        /// <param name="listener">a message listener</param>
+        /// <returns></returns>
+        public void Seek(string topic, string groupId, int partition, long offset, IKafkaMessageListener listener)
+        {
+            // Check for open connection
+            CheckOpen();
+
+            // Find the subscription
+            var subscription = _subscriptions.Find((s) => s.Topic == topic && s.GroupId == groupId && s.Listener == listener);
+            var autocommit = _autocommitSubscriptions[_subscriptions.IndexOf(subscription)];
+            if (subscription == null || autocommit)
+                return;
+
+            // Seek the offset
+            var topicOffset = new TopicPartitionOffset(
+                new TopicPartition(topic, new Partition(partition)),
+                new Offset(offset)
+            );
+
+            subscription.Handler.Seek(topicOffset);
         }
     }
 }

@@ -139,7 +139,7 @@ namespace PipServices3.Kafka.Queues
             });
 
             await _queue.SendAsync(null, envelope1);
-            await Task.Delay(5000);
+            await Task.Delay(1000);
 
             Assert.NotNull(envelope2);
             Assert.Equal(envelope1.MessageType, envelope2.MessageType);
