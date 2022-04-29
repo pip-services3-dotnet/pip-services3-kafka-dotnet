@@ -1,123 +1,157 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Text;
-using System.Threading;
 using System.Threading.Tasks;
 using PipServices3.Commons.Config;
+using PipServices3.Commons.Convert;
 using PipServices3.Commons.Errors;
-using PipServices3.Components.Auth;
-using PipServices3.Components.Connect;
+using PipServices3.Commons.Refer;
 using PipServices3.Messaging.Queues;
+using PipServices3.Kafka.Connect;
 using Confluent.Kafka;
-using Confluent.Kafka.Admin;
-using PipServices3.Commons.Data;
 
 namespace PipServices3.Kafka.Queues
 {
     /// <summary>
-    /// Message queue that sends and receives messages via Apache Kafka message broker.
-    /// 
-    /// Apache Kafka is an open-source distributed event streaming platform used by thousands of companies for high-performance data pipelines, streaming analytics, data integration, and mission-critical applications.
-    /// 
-    /// ### Configuration parameters ###
-    /// 
-    /// - topic.name:                  name of Kafka topic to subscribe
-    /// 
-    /// connection(s):
-    /// - discovery_key:               (optional) a key to retrieve the connection from <a href="https://pip-services3-dotnet.github.io/pip-services3-components-dotnet/interface_pip_services_1_1_components_1_1_connect_1_1_i_discovery.html">IDiscovery</a>
-    /// - host:                        host name or IP address
-    /// - port:                        port number
-    /// - uri:                         resource URI or connection string with all parameters in it
-    /// 
-    /// credential(s):
-    /// - store_key:                   (optional) a key to retrieve the credentials from <a href="https://pip-services3-dotnet.github.io/pip-services3-components-dotnet/interface_pip_services_1_1_components_1_1_auth_1_1_i_credential_store.html">ICredentialStore</a>
-    /// - username:                    user name
-    /// - password:                    user password
-    /// 
-    /// ### References ###
-    /// 
-    /// - *:logger:*:*:1.0             (optional) <a href="https://pip-services3-dotnet.github.io/pip-services3-components-dotnet/interface_pip_services_1_1_components_1_1_log_1_1_i_logger.html">ILogger</a> components to pass log messages
-    /// - *:counters:*:*:1.0           (optional) <a href="https://pip-services3-dotnet.github.io/pip-services3-components-dotnet/interface_pip_services_1_1_components_1_1_count_1_1_i_counters.html">ICounters</a> components to pass collected measurements
-    /// - *:discovery:*:*:1.0          (optional) <a href="https://pip-services3-dotnet.github.io/pip-services3-components-dotnet/interface_pip_services_1_1_components_1_1_connect_1_1_i_discovery.html">IDiscovery</a> services to resolve connections
+    /// KafkaMessageQueue are message queue that sends and receives messages via Kafka message broker.
+    ///
+    /// Configuration parameters:
+    ///
+    /// - topic:                         name of Kafka topic to subscribe
+    /// - group_id:                      (optional) consumer group id (default: default)
+    /// - from_beginning:                (optional) restarts receiving messages from the beginning (default: false)
+    /// - read_partitions:               (optional) number of partitions to be consumed concurrently (default: 1)
+    /// - autocommit:                    (optional) turns on/off autocommit (default: true)
+    /// - connection(s) :
+    ///  - discovery_key:               (optional) a key to retrieve the connection from  IDiscovery
+    ///  - host:                        host name or IP address
+    ///  - port:                        port number
+    ///  - uri:                         resource URI or connection string with all parameters in it
+    /// - credential(s) :
+    ///  - store_key:                   (optional) a key to retrieve the credentials from  ICredentialStore
+    ///  - username:                    user name
+    ///  - password:                    user password
+    /// - options:
+    ///  - autosubscribe:        (optional) true to automatically subscribe on option(default: false)
+    ///      - acks                  (optional) control the number of required acks: -1 - all, 0 - none, 1 - only leader (default: -1)
+    ///      - autocommit_timeout    (optional) number of milliseconds to perform autocommit offsets (default: 1000)
+    ///      - connect_timeout:      (optional) number of milliseconds to connect to broker (default: 1000)
+    ///      - max_retries:          (optional) maximum retry attempts (default: 5)
+    ///      - retry_timeout:        (optional) number of milliseconds to wait on each reconnection attempt (default: 30000)
+    ///      - request_timeout:      (optional) number of milliseconds to wait on broker request (default: 30000)
+    ///      - flush_timeout:        (optional) number of milliseconds to wait on flushing messages (default: 30000)
+    ///
+    ///
+    /// References:
+    ///
+    /// - *:logger:*:*:1.0             (optional) ILogger components to pass log messages
+    /// - *:counters:*:*:1.0           (optional) ICounters components to pass collected measurements
+    /// - *:discovery:*:*:1.0          (optional) IDiscovery services to resolve connections
     /// - *:credential-store:*:*:1.0   (optional) Credential stores to resolve credentials
+    /// - *:connection:kafka:*:1.0      (optional) Shared connection to Kafka service
+    ///
+    /// See MessageQueue
+    /// See MessagingCapabilities
+    ///
+    /// Example:
+    ///
+    ///    var queue = new KafkaMessageQueue("myqueue");
+    ///    queue.Configure(ConfigParams.FromTuples(
+    ///      "subject", "mytopic",
+    ///      "connection.protocol", "tcp"
+    ///      "connection.host", "localhost"
+    ///      "connection.port", 9092
+    ///    ));
+    ///
+    ///    await queue.OpenAsync("123");
+    ///
+    ///    await queue.SendAsync("123", new MessageEnvelope("", "mymessage", "ABC"));
+    ///
+    ///    var message = await queue.ReceiveAsync("123");
+    ///    if (message != null) {
+    ///		...
+    ///		await queue.CompleteAsync("123", message);
+    ///    }
     /// </summary>
-    /// <example>
-    /// <code>
-    /// var queue = new KafkaMessageQueue("myqueue");
-    /// queue.configure(ConfigParams.FromTuples(
-    /// "topic.name", "mytopic",
-    /// "connection.host", "localhost"
-    /// "connection.port", 9092 ));
-    /// queue.Open("123");
-    /// 
-    /// queue.Send("123", new MessageEnvelop(null, "mymessage", "ABC"));
-    /// queue.Receive("123", 0);
-    /// queue.Complete("123", message);
-    /// </code>
-    /// </example>
-    public class KafkaMessageQueue : MessageQueue
+    public class KafkaMessageQueue : CachedMessageQueue, IKafkaMessageListener
     {
-        private const string MSG_HEADER_TYPE = "type";
-        private const string MSG_HEADER_CORRELATIONID = "correlationId";
+        private ConfigParams _config;
+        private IReferences _references;
+        private bool _opened;
+        private bool _localConnection;
+        private DependencyResolver _dependencyResolver = new DependencyResolver();
+        private KafkaConnection _connection;
+        private bool _subscribed;
 
-        private readonly AdminClientConfig _adminClientConfig;
-        private readonly ProducerConfig _producerConfig;
-        private readonly ConsumerConfig _consumerConfig;
+        private string _topic;
+        private string _groupId = "default";
+        private bool _fromBeginning;
+        private int _readPartitions;
+        private bool _autocommit;
+        private int _autocommitTimeout;
 
-        private readonly TopicSpecification _topicSpec;
-
-        private IProducer<string, string> _producer;
-        private IConsumer<string, string> _consumer;
-        private IAdminClient _adminClient;
-
-        private CancellationTokenSource _cancel = new CancellationTokenSource();
-
-        private readonly int DefaultPort = 9092;
-
-        public override long? MessageCount
-        {
-            get
-            {
-                CheckOpened(null);
-                return CalculateMessageCount();
-            }
-        }
-
-        /// <summary>
-        /// Creates a new instance of the message queue.
-        /// </summary>
-        /// <param name="name">(optional) a queue name.</param>
         public KafkaMessageQueue(string name = null)
+            : base(name, new MessagingCapabilities(false, true, true, true, true, false, false, false, true))
         {
-            _adminClientConfig = new AdminClientConfig();
-            _producerConfig = new ProducerConfig();
-            _consumerConfig = new ConsumerConfig();
-            _topicSpec = new TopicSpecification();
-
-            Name = name ?? string.Format("queue-{0}", IdGenerator.NextLong());
-
-            Capabilities = new MessagingCapabilities(false, true, true, false, false, false, true, false, false);
-        }
-
-        public KafkaMessageQueue(string name, ConfigParams config)
-            : this(name)
-        {
-            if (config != null) Configure(config);
+            _dependencyResolver.Put("connection", new Descriptor("pip-services", "connection", "kafka", "*", "1.0"));
         }
 
         /// <summary>
-        /// Configures component by passing configuration parameters.
+        /// Configure are configures component by passing configuration parameters.
         /// </summary>
-        /// <param name="config">configuration parameters to be set.</param>
+        /// <param name="config">Configuration parameters to be set</param>
         public override void Configure(ConfigParams config)
         {
             base.Configure(config);
+            _dependencyResolver.Configure(config);
 
-            _topicSpec.Name = config.GetAsStringWithDefault("topic.name", Name);
-            _topicSpec.NumPartitions = config.GetAsIntegerWithDefault("topic.num_partitions", 1);
-            _topicSpec.ReplicationFactor = Convert.ToInt16(config.GetAsIntegerWithDefault("topic.replication_factor", -1));
-            
-            _consumerConfig.GroupId = config.GetAsStringWithDefault("consumer.group_id", "custom-group");
+            _config = config;
+
+            _topic = config.GetAsStringWithDefault("topic", _topic);
+            _groupId = config.GetAsStringWithDefault("group_id", _groupId);
+            _fromBeginning = config.GetAsBooleanWithDefault("from_beginning", _fromBeginning);
+            _readPartitions = config.GetAsIntegerWithDefault("read_partitions", _readPartitions);
+            _autocommit = config.GetAsBooleanWithDefault("autocommit", _autocommit);
+            _autocommitTimeout = config.GetAsIntegerWithDefault("options.autocommit_timeout", _autocommitTimeout);
+        }
+
+        /// <summary>
+        /// SetReferences are sets references to dependent components.
+        /// </summary>
+        /// <param name="references">References to be set</param>
+        public override void SetReferences(IReferences references)
+        {
+            base.SetReferences(references);
+
+            _references = references;
+
+            _dependencyResolver.SetReferences(references);
+            // Get connection
+            _connection = _dependencyResolver.GetOneOptional<KafkaConnection>("connection");
+
+            // Or create a local one
+            if (_connection == null)
+            {
+                _connection = CreateConnection();
+                _localConnection = true;
+            }
+            else
+            {
+                _localConnection = false;
+            }
+        }
+
+        private KafkaConnection CreateConnection()
+        {
+            var connection = new KafkaConnection();
+            if (_config != null)
+            {
+                connection.Configure(_config);
+            }
+            if (_references != null)
+            {
+                connection.SetReferences(_references);
+            }
+            return connection;
         }
 
         /// <summary>
@@ -126,33 +160,39 @@ namespace PipServices3.Kafka.Queues
         /// <returns>true if the component has been opened and false otherwise.</returns>
         public override bool IsOpen()
         {
-            return _producer != null && _consumer != null && _adminClient != null;
+            return _opened;
         }
 
         /// <summary>
         /// Opens the component with given connection and credential parameters.
         /// </summary>
         /// <param name="correlationId">(optional) transaction id to trace execution through call chain.</param>
-        /// <param name="connection">connection parameters</param>
-        /// <param name="credential">credential parameters</param>
-        public async override Task OpenAsync(string correlationId, ConnectionParams connection, CredentialParams credential)
+        public async override Task OpenAsync(string correlationId)
         {
-            string uri = !string.IsNullOrEmpty(connection.Uri)
-                ? connection.Uri
-                : string.Format("{0}:{1}", connection.Host, connection.Port != 0 ? connection.Port : DefaultPort);
+            if (IsOpen())
+            {
+                return;
+            }
 
-            SecurityProtocol securityProtocol = MapProtocol(connection.Protocol);
+            if (_connection == null)
+            {
+                _connection = CreateConnection();
+                _localConnection = true;
+            }
 
-            SetupConfig(_adminClientConfig, uri, securityProtocol, credential);
-            SetupConfig(_producerConfig, uri, securityProtocol, credential);
-            SetupConfig(_consumerConfig, uri, securityProtocol, credential);
+            if (_localConnection)
+            {
+                await _connection.OpenAsync(correlationId);
+            }
 
-            _adminClient = CreateAdminClient(correlationId, _adminClientConfig);
+            if (!_connection.IsOpen())
+            {
+                throw new InvalidStateException(correlationId, "CONNECT_FAILED", "Kafka connection is not opened");
+            }
 
-            await CreateTopicAsync(correlationId);
+            await base.OpenAsync(correlationId);
 
-            _producer = CreateProducer(correlationId, _producerConfig);
-            _consumer = CreateConsumer(correlationId, _topicSpec.Name, _consumerConfig);
+            _opened = true;
         }
 
         /// <summary>
@@ -161,15 +201,178 @@ namespace PipServices3.Kafka.Queues
         /// <param name="correlationId">(optional) transaction id to trace execution through call chain.</param>
         public override async Task CloseAsync(string correlationId)
         {
-            _cancel.Cancel();
+            if (!IsOpen())
+            {
+                return;
+            }
 
-            CloseProducer();
-            CloseConsumer();
-            CloseAdminClient();
+            if (_connection == null)
+            {
+                throw new InvalidStateException(correlationId, "NO_CONNECTION", "Kafka connection is missing");
+            }
 
-            _logger.Trace(correlationId, "Closed queue {0}", this);
+            if (_localConnection)
+            {
+                await _connection.CloseAsync(correlationId);
+            }
 
-            await Task.Delay(0);
+            _opened = false;
+
+            await base.CloseAsync(correlationId);
+        }
+
+        private string GetTopic()
+        {
+            return !string.IsNullOrEmpty(_topic) ? _topic : Name;
+        }
+
+        protected override async Task SubscribeAsync(string correlationId)
+        {
+            // Check if already were subscribed
+            if (_subscribed)
+            {
+                return;
+            }
+
+            // Subscribe to the topic
+            var topic = GetTopic();
+            var config = new ConsumerConfig
+            {
+                EnableAutoCommit = _autocommit,
+                AutoCommitIntervalMs = _autocommitTimeout
+            };
+
+            await _connection.SubscribeAsync(topic, _groupId, config, this);
+
+            _subscribed = true;
+        }
+
+        protected override async Task UnsubscribeAsync(string correlationId)
+        {
+            // Check if already were unsubscribed
+            if (!_subscribed)
+            {
+                return;
+            }
+
+            // Unsubscribe from the topic
+            var topic = GetTopic();
+            await _connection.UnsubscribeAsync(topic, _groupId, this);
+
+            _subscribed = false;
+        }
+
+        private Message<byte[], byte[]> FromMessage(MessageEnvelope message)
+        {
+            var data = message.Message;
+
+            var headers = new Headers();
+            if (message.CorrelationId != null)
+            {
+                headers.Add("correlation_id", Encoding.UTF8.GetBytes(message.CorrelationId));
+            }
+            if (message.MessageType != null)
+            {
+                headers.Add("message_type", Encoding.UTF8.GetBytes(message.MessageType));
+            }
+            var sentTime = StringConverter.ToNullableString(DateTime.UtcNow);
+            headers.Add("sent_time", Encoding.UTF8.GetBytes(sentTime));
+
+            var msg = new Message<byte[], byte[]>();
+            msg.Headers = headers;
+
+            if (message.MessageId != null)
+            {
+                msg.Key = Encoding.UTF8.GetBytes(message.MessageId);
+            }
+            msg.Value = message.Message;
+
+            return msg;
+        }
+
+        private MessageEnvelope ToMessage(KafkaMessage msg)
+        {
+            if (msg == null || msg.Message == null)
+            {
+                return null;
+            }
+
+            var correlationId = GetHeaderByKey(msg.Message.Headers, "correlation_id");
+            var messageType = GetHeaderByKey(msg.Message.Headers, "message_type");
+
+            MessageEnvelope message = new MessageEnvelope(correlationId, messageType, msg.Message.Value);
+
+            if (msg.Message.Key != null)
+            {
+                message.MessageId = Encoding.UTF8.GetString(msg.Message.Key);
+            }
+
+            var sentTime = GetHeaderByKey(msg.Message.Headers, "sent_time");
+            message.SentTime = DateTimeConverter.ToDateTime(sentTime);
+
+            message.Reference = msg;
+
+            return message;
+        }
+
+        private string GetHeaderByKey(Headers headers, string key)
+        {
+            if (headers == null)
+            {
+                return null;
+            }
+
+            byte[] value = null;
+            headers.TryGetLastBytes(key, out value);
+
+            if (value != null)
+            {
+                return Encoding.UTF8.GetString(value);
+            }
+
+            return null;
+        }
+
+        public void OnMessage(KafkaMessage msg)
+        {
+            // Deserialize message
+            var message = ToMessage(msg);
+            if (message == null)
+            {
+                _logger.Error(null, null, "Failed to read received message");
+                return;
+            }
+
+            _counters.IncrementOne("queue." + Name + ".received_messages");
+            _logger.Debug(message.CorrelationId, "Received message {0} via {1}", message, Name);
+
+            if (_receiver != null)
+            {
+                SendMessageToReceiver(_receiver, message);
+            }
+            else
+            {
+                lock (_lock)
+                {
+                    _messages.Enqueue(message);
+                }
+
+                _receiveEvent.Set();
+            }
+        }
+
+        private void SendMessageToReceiver(IMessageReceiver receiver, MessageEnvelope message)
+        {
+            var correlationId = message?.CorrelationId;
+
+            try
+            {
+                receiver.ReceiveMessageAsync(message, this).Wait();
+            }
+            catch (Exception ex)
+            {
+                _logger.Error(correlationId, ex, "Failed to process the message");
+            }
         }
 
         /// <summary>
@@ -179,438 +382,86 @@ namespace PipServices3.Kafka.Queues
         /// <param name="message">a message envelop to be sent.</param>
         public override async Task SendAsync(string correlationId, MessageEnvelope message)
         {
-            CheckOpened(correlationId);
-            
-            var envelope = ToEnvelope(message);
-            await _producer.ProduceAsync(_topicSpec.Name, envelope);
+            CheckOpen(correlationId);
 
             _counters.IncrementOne("queue." + Name + ".sent_messages");
-            _logger.Debug(message.CorrelationId, "Sent message {0} via {1}", message, this);
+            _logger.Debug(message.CorrelationId, "Sent message {0} via %s", message, Name);
+
+            var msg = FromMessage(message);
+
+            var topic = !string.IsNullOrEmpty(Name) ? Name : _topic;
+
+            await _connection.PublishAsync(topic, msg);
         }
 
         /// <summary>
-        /// Receives an incoming message and removes it from the queue.
-        /// </summary>
-        /// <param name="correlationId">(optional) transaction id to trace execution through call chain.</param>
-        /// <param name="waitTimeout">a timeout in milliseconds to wait for a message to come.</param>
-        /// <returns>a message</returns>
-        public override async Task<MessageEnvelope> ReceiveAsync(string correlationId, long waitTimeout)
-        {
-            CancellationTokenSource cancel = new CancellationTokenSource(TimeSpan.FromMilliseconds(waitTimeout));
-            ConsumeResult<string, string> consumeResult = _consumer.Consume(cancel.Token);
-
-            var message = ToMessage(consumeResult?.Message);
-
-            if (message != null)
-            {
-                _counters.IncrementOne("queue." + Name + ".received_messages");
-                _logger.Debug(message.CorrelationId, "Received message {0} via {1}", message, this);
-            }
-
-            return await Task.FromResult(message);
-        }
-
-        /// <summary>
-        /// Listens for incoming messages and blocks the current thread until queue is closed.
-        /// </summary>
-        /// <param name="correlationId">(optional) transaction id to trace execution through call chain.</param>
-        /// <param name="callback"></param>
-        /// <returns></returns>
-        public override async Task ListenAsync(string correlationId, Func<MessageEnvelope, IMessageQueue, Task> callback)
-        {
-            CheckOpened(correlationId);
-            _logger.Debug(correlationId, "Started listening messages at {0}", this);
-
-            // Create new cancelation token
-            _cancel = new CancellationTokenSource();
-
-            while (!_cancel.IsCancellationRequested)
-            {
-                var envelope = _consumer.Consume(_cancel.Token);
-
-                if (envelope != null && !_cancel.IsCancellationRequested)
-                {
-                    var message = ToMessage(envelope.Message);
-
-                    _counters.IncrementOne("queue." + Name + ".received_messages");
-                    _logger.Debug(message.CorrelationId, "Received message {0} via {1}", message, this);
-
-                    try
-                    {
-                        await callback(message, this);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.Error(correlationId, ex, "Failed to process the message");
-                        //throw ex;
-                    }
-                }
-            }
-        }
-
-        /// <summary>
-        /// Ends listening for incoming messages.
-        /// When this method is call listen unblocks the thread and execution continues.
-        /// </summary>
-        /// <param name="correlationId">(optional) transaction id to trace execution through call chain.</param>
-        public override void EndListen(string correlationId)
-        {
-            _cancel.Cancel();
-        }
-
-        /// <summary>
-        /// Returnes message into the queue and makes it available for all subscribers to receive it again.
-        /// This method is usually used to return a message which could not be processed at the moment
-        /// to repeat the attempt.Messages that cause unrecoverable errors shall be removed permanently
-        /// or/and send to dead letter queue.
-        /// 
-        /// Important: This method is not supported by MQTT.
-        /// </summary>
-        /// <param name="message">a message to return.</param>
-        public override async Task AbandonAsync(MessageEnvelope message)
-        {
-            CheckOpened(message.CorrelationId);
-
-            // Make the message immediately visible
-            var envelope = message.Reference as Message<string, string>;
-            if (envelope != null)
-            {
-                await _producer.ProduceAsync(_topicSpec.Name, envelope);
-
-                message.Reference = null;
-                _logger.Trace(message.CorrelationId, "Abandoned message {0} at {1}", message, this);
-            }
-
-            await Task.Delay(0);
-        }
-
-        /// <summary>
-        /// Clears component state.
-        /// </summary>
-        /// <param name="correlationId">(optional) transaction id to trace execution through call chain.</param>
-        /// <returns></returns>
-        public override async Task ClearAsync(string correlationId)
-        {
-            CheckOpened(correlationId);
-
-            await Task.Delay(0);
-
-            _logger.Trace(null, "Cleared queue {0}", this);
-        }
-
-        #region Operations that are not supported
-        /// <summary>
-        /// Peeks a single incoming message from the queue without removing it.
-        /// If there are no messages available in the queue it returns null.
-        /// </summary>
-        /// <param name="correlationId">(optional) transaction id to trace execution through call chain.</param>
-        /// <returns>a message</returns>
-        public override async Task<MessageEnvelope> PeekAsync(string correlationId)
-        {
-            CheckOpened(correlationId);
-
-            // Operation is not supported
-
-            return await Task.FromResult<MessageEnvelope>(null);
-        }
-
-        /// <summary>
-        /// Peeks multiple incoming messages from the queue without removing them.
-        /// If there are no messages available in the queue it returns an empty list.
-        /// </summary>
-        /// <param name="correlationId">(optional) transaction id to trace execution through call chain.</param>
-        /// <param name="messageCount">a maximum number of messages to peek.</param>
-        /// <returns>a list with messages</returns>
-        public override async Task<List<MessageEnvelope>> PeekBatchAsync(string correlationId, int messageCount)
-        {
-            CheckOpened(correlationId);
-
-            // Operation is not supported
-
-            return await Task.FromResult<List<MessageEnvelope>>(null);
-        }
-
-        /// <summary>
-        /// Renews a lock on a message that makes it invisible from other receivers in the queue.
-        /// This method is usually used to extend the message processing time.
-        /// 
-        /// Important: This method is not supported by MQTT.
+        /// Renews a lock on a message that makes it invisible from other receivers in
+        /// the queue.This method is usually used to extend the message processing time.
         /// </summary>
         /// <param name="message">a message to extend its lock.</param>
         /// <param name="lockTimeout">a locking timeout in milliseconds.</param>
         public override async Task RenewLockAsync(MessageEnvelope message, long lockTimeout)
         {
-            CheckOpened(message.CorrelationId);
+            // Not supported
+            await Task.Delay(0);
+        }
 
-            // Operation is not supported
+        /// <summary>
+        /// Returns message into the queue and makes it available for all subscribers to
+        /// receive it again.This method is usually used to return a message which could
+        /// not be processed at the moment to repeat the attempt.Messages that cause
+        /// unrecoverable errors shall be removed permanently or/and send to dead letter queue.
+        /// </summary>
+        /// <param name="message">a message to return.</param>
+        public override async Task AbandonAsync(MessageEnvelope message)
+        {
+            CheckOpen(null);
+
+            var msg = message.Reference as KafkaMessage;
+            if (_autocommit || msg == null)
+            {
+                return;
+            }
+
+            // Rollback to the message offset so it will come back again
+            msg.Consumer.StoreOffset(msg.Result);
+            message.Reference = null;
+
+            await Task.Delay(0);
+        }
+
+        /// <summary>
+        /// Permanently removes a message from the queue. This method is usually used to
+        /// remove the message after successful processing.
+        /// </summary>
+        /// <param name="message">a message to remove.</param>
+        public override async Task CompleteAsync(MessageEnvelope message)
+        {
+            CheckOpen(null);
+
+            var msg = message.Reference as KafkaMessage;
+            if (_autocommit || msg == null)
+            {
+                return;
+            }
+
+            // Commit the message offset so it won't come back
+            msg.Consumer.Commit(msg.Result);
+            message.Reference = null;
 
             await Task.Delay(0);
         }
 
         /// <summary>
         /// Permanently removes a message from the queue and sends it to dead letter queue.
-        /// 
-        /// Important: This method is not supported by MQTT.
         /// </summary>
         /// <param name="message">a message to be removed.</param>
-        /// <returns></returns>
         public override async Task MoveToDeadLetterAsync(MessageEnvelope message)
         {
-            CheckOpened(message.CorrelationId);
-
-            // Operation is not supported
-
+            // Not supported
             await Task.Delay(0);
         }
 
-        /// <summary>
-        /// Permanently removes a message from the queue.
-        /// This method is usually used to remove the message after successful processing.
-        /// 
-        /// Important: This method is not supported by MQTT.
-        /// </summary>
-        /// <param name="message">a message to remove.</param>
-        public override async Task CompleteAsync(MessageEnvelope message)
-        {
-            CheckOpened(message.CorrelationId);
 
-            // Operation is not supported
-
-            await Task.Delay(0);
-        }
-        #endregion
-
-        #region Helper methods
-        private long CalculateMessageCount()
-        {
-            long total = 0;
-
-            foreach (var partition in _consumer.Assignment)
-            {
-                var offsets = _consumer.QueryWatermarkOffsets(partition, TimeSpan.FromSeconds(5));
-                total += offsets.High.Value - offsets.Low.Value;
-            }
-
-            return total;
-        }
-
-        private bool TopicExist(string name)
-        {
-            Metadata metadata = _adminClient.GetMetadata(name, TimeSpan.FromSeconds(5));
-            return metadata != null && metadata.Topics.Count > 0;
-        }
-
-        private void SetupConfig(ClientConfig clientConfig, string uri, SecurityProtocol securityProtocol, CredentialParams credential)
-        {
-            clientConfig.BootstrapServers = uri;
-
-            if (credential != null && !string.IsNullOrEmpty(credential.Username))
-            {
-                clientConfig.SecurityProtocol = securityProtocol;
-                clientConfig.SaslUsername = credential.Username;
-                clientConfig.SaslPassword = credential.Password;
-            }
-        }
-
-        private SecurityProtocol MapProtocol(string protocol)
-        {
-            switch (protocol.ToLower())
-            {
-                case "ssl": return SecurityProtocol.Ssl;
-                case "saslssl": return SecurityProtocol.SaslSsl;
-                case "saslplaintext": return SecurityProtocol.SaslPlaintext;
-                default: return SecurityProtocol.Plaintext;
-            }
-        }
-
-        private async Task CreateTopicAsync(string correlationId)
-        {
-            try
-            {
-                await _adminClient.CreateTopicsAsync(new[] { _topicSpec });
-            }
-            catch (CreateTopicsException ex)
-            {
-                if ((ex.Error.Code == ErrorCode.Local_Partial && ex.Error.Reason.Contains("already exists")) ||
-                    ex.Error.Code == ErrorCode.TopicAlreadyExists)
-                    return;
-
-                _logger.Error(correlationId, ex, "Failed to create Kafka topic with name {0}", _topicSpec.Name);
-                //throw ex;
-            }
-        }
-
-        private IAdminClient CreateAdminClient(string correlationId, AdminClientConfig config)
-        {
-            try
-            {
-                return new AdminClientBuilder(config).Build();
-            }
-            catch (Exception ex)
-            {
-                throw new ConnectionException(
-                    correlationId,
-                    "CANNOT_CONNECT",
-                    "Cannot connect admin to Kafka at " + config.BootstrapServers
-                ).Wrap(ex);
-            }
-        }
-
-        private IConsumer<string, string> CreateConsumer(string correlationId, string topic, ConsumerConfig config)
-        {
-            try
-            {
-                IConsumer<string, string> consumer = new ConsumerBuilder<string, string>(config).Build();
-                consumer.Subscribe(topic);
-                
-
-                return consumer;
-            }
-            catch (Exception ex)
-            {
-                throw new ConnectionException(
-                    correlationId,
-                    "CANNOT_CONNECT",
-                    "Cannot connect consumer to Kafka at " + config.BootstrapServers
-                ).Wrap(ex);
-            }
-        }
-
-        private IProducer<string, string> CreateProducer(string correlationId, ProducerConfig config)
-        {
-            try
-            {
-                return new ProducerBuilder<string, string>(config).Build();
-            }
-            catch (Exception ex)
-            {
-                throw new ConnectionException(
-                    correlationId,
-                    "CANNOT_CONNECT",
-                    "Cannot connect producer to Kafka at " + config.BootstrapServers
-                ).Wrap(ex);
-            }
-        }
-
-        private void CloseAdminClient()
-        {
-            var adminClient = _adminClient;
-            if (adminClient != null)
-            {
-                adminClient.Dispose();
-            }
-
-            _adminClient = null;
-        }
-
-        private void CloseConsumer()
-        {
-            var consumer = _consumer;
-            if (consumer != null)
-            {
-                consumer.Close();
-                consumer.Dispose();
-            }
-
-            _consumer = null;
-        }
-
-        private void CloseProducer()
-        {
-            var producer = _producer;
-            if (producer != null)
-            {
-                producer.Dispose();
-            }
-
-            _producer = null;
-        }
-
-        private async Task ChangeRetentionAsync(string name, TimeSpan retention, int bytes)
-        {
-            var configResource = new ConfigResource { Name = name, Type = ResourceType.Topic };
-            var toUpdate = new Dictionary<ConfigResource, List<ConfigEntry>>
-                {
-                    {   configResource,
-                        new List<ConfigEntry> {
-                            new ConfigEntry { Name = "retention.ms", Value = Convert.ToInt32(retention.TotalMilliseconds).ToString() },
-                            new ConfigEntry { Name = "retention.bytes", Value = bytes.ToString() }
-                        }
-                    }
-                };
-
-            try
-            {
-                await _adminClient.AlterConfigsAsync(toUpdate);
-            }
-            catch
-            {
-            }
-        }
-
-        private void CheckOpened(string correlationId)
-        {
-            if (!IsOpen())
-                throw new InvalidStateException(correlationId, "NOT_OPENED", "The queue is not opened");
-        }
-
-        private static MessageEnvelope ToMessage(Message<string, string> envelope)
-        {
-            if (envelope == null) return null;
-
-            string messageType = GetHeaderByKey(envelope.Headers, MSG_HEADER_TYPE);
-            string correlationId = GetHeaderByKey(envelope.Headers, MSG_HEADER_CORRELATIONID);
-
-            MessageEnvelope message = new MessageEnvelope
-            {
-                MessageId = envelope.Key,
-                MessageType = messageType,
-                CorrelationId = correlationId,
-                Message = envelope.Value,
-                SentTime = envelope.Timestamp.UtcDateTime,
-                Reference = envelope
-            };
-
-            return message;
-        }
-
-        private static Message<string, string> ToEnvelope(MessageEnvelope envelope)
-        {
-            if (envelope == null) return null;
-
-            Headers headers = new Headers
-            {
-                { MSG_HEADER_TYPE, Encoding.UTF8.GetBytes(envelope.MessageType) },
-                { MSG_HEADER_CORRELATIONID, Encoding.UTF8.GetBytes(envelope.CorrelationId) }
-            };
-
-            Message<string, string> message = new Message<string, string>
-            {
-                Key = envelope.MessageId,
-                Value = envelope.Message,
-                Headers = headers,
-                Timestamp = new Timestamp(envelope.SentTime)
-            };
-
-            return message;
-        }
-
-        private static string GetHeaderByKey(Headers headers, string key)
-        {
-            if (headers != null)
-            {
-                try
-                {
-                    byte[] bytes = headers.GetLastBytes(key);
-                    return Encoding.UTF8.GetString(bytes);
-                }
-                catch (KeyNotFoundException)
-                {
-                }
-            }
-
-            return null;
-        }
-        #endregion
     }
 }
