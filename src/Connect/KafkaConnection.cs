@@ -132,6 +132,9 @@ namespace PipServices3.Kafka.Connect
         /// <param name="correlationId">(optional) transaction id to trace execution through call chain.</param>
         public async Task OpenAsync(string correlationId)
         {
+            if (IsOpen())
+                return;
+
             var options = await _connectionResolver.ResolveAsync(correlationId);
             var uri = options.GetAsString("servers");
 
@@ -185,10 +188,8 @@ namespace PipServices3.Kafka.Connect
         /// <param name="correlationId">(optional) transaction id to trace execution through call chain.</param>
         public async Task CloseAsync(string correlationId)
         {
-            if (_connection == null)
-            {
+            if (!IsOpen())
                 return;
-            }
 
             try
             {
@@ -198,7 +199,7 @@ namespace PipServices3.Kafka.Connect
                 foreach (var subscription in _subscriptions)
                 {
                     try
-                    {   
+                    {
                         subscription.Token.Cancel();
                         subscription.Handler.Unsubscribe();
                         subscription.Handler.Close();
@@ -327,10 +328,8 @@ namespace PipServices3.Kafka.Connect
 
         private void CheckOpen()
         {
-            if (_connection != null)
-            {
+            if (IsOpen())
                 return;
-            }
 
             throw new InvalidStateException(
                 null,

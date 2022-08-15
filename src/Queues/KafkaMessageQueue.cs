@@ -31,14 +31,15 @@ namespace PipServices3.Kafka.Queues
     ///  - username:                    user name
     ///  - password:                    user password
     /// - options:
-    ///  - autosubscribe:        (optional) true to automatically subscribe on option(default: false)
-    ///      - acks                  (optional) control the number of required acks: -1 - all, 0 - none, 1 - only leader (default: -1)
-    ///      - autocommit_timeout    (optional) number of milliseconds to perform autocommit offsets (default: 1000)
-    ///      - connect_timeout:      (optional) number of milliseconds to connect to broker (default: 1000)
-    ///      - max_retries:          (optional) maximum retry attempts (default: 5)
-    ///      - retry_timeout:        (optional) number of milliseconds to wait on each reconnection attempt (default: 30000)
-    ///      - request_timeout:      (optional) number of milliseconds to wait on broker request (default: 30000)
-    ///      - flush_timeout:        (optional) number of milliseconds to wait on flushing messages (default: 30000)
+    ///     - listen_connection:    (optional) listening if the connection is alive (default: false) 
+    ///     - autosubscribe:        (optional) true to automatically subscribe on option(default: false)
+    ///     - acks                  (optional) control the number of required acks: -1 - all, 0 - none, 1 - only leader (default: -1)
+    ///     - autocommit_timeout    (optional) number of milliseconds to perform autocommit offsets (default: 1000)
+    ///     - connect_timeout:      (optional) number of milliseconds to connect to broker (default: 1000)
+    ///     - max_retries:          (optional) maximum retry attempts (default: 5)
+    ///     - retry_timeout:        (optional) number of milliseconds to wait on each reconnection attempt (default: 30000)
+    ///     - request_timeout:      (optional) number of milliseconds to wait on broker request (default: 30000)
+    ///     - flush_timeout:        (optional) number of milliseconds to wait on flushing messages (default: 30000)
     ///
     ///
     /// References:
@@ -89,6 +90,13 @@ namespace PipServices3.Kafka.Queues
         private bool _autocommit;
         private int _autocommitTimeout;
 
+        private bool _listenConnection = false;
+
+        /// <summary>
+        /// The Kafka connection listener component.
+        /// </summary>
+        protected KafkaConnectionListener _connectionListener;
+
         public KafkaMessageQueue(string name = null)
             : base(name, new MessagingCapabilities(false, true, true, true, true, false, false, false, true))
         {
@@ -112,6 +120,7 @@ namespace PipServices3.Kafka.Queues
             _readPartitions = config.GetAsIntegerWithDefault("read_partitions", _readPartitions);
             _autocommit = config.GetAsBooleanWithDefault("autocommit", _autocommit);
             _autocommitTimeout = config.GetAsIntegerWithDefault("options.autocommit_timeout", _autocommitTimeout);
+            _listenConnection = config.GetAsBooleanWithDefault("options.listen_connection", _listenConnection);
         }
 
         /// <summary>
@@ -132,6 +141,10 @@ namespace PipServices3.Kafka.Queues
             if (_connection == null)
             {
                 _connection = CreateConnection();
+
+                if (_listenConnection)
+                    _connectionListener = CreateConnectionListener();
+
                 _localConnection = true;
             }
             else
@@ -143,15 +156,45 @@ namespace PipServices3.Kafka.Queues
         private KafkaConnection CreateConnection()
         {
             var connection = new KafkaConnection();
+            var reference = new Reference(new Descriptor("pip-services", "connection", "kafka", "*", "1.0"), connection);
+
             if (_config != null)
             {
                 connection.Configure(_config);
             }
+
             if (_references != null)
             {
                 connection.SetReferences(_references);
+                _references.Put(reference.GetLocator(), reference.GetComponent());
             }
+            else
+            {
+                _references = References.FromTuples(reference.GetLocator(), reference.GetComponent());
+            }
+
             return connection;
+        }
+
+        private KafkaConnectionListener CreateConnectionListener()
+        {
+            var connectionListener = new KafkaConnectionListener();
+            var reference = new Reference(new Descriptor("pip-services", "connection-listener", "kafka", "*", "1.0"), connectionListener);
+
+            if (_config != null)
+                connectionListener.Configure(_config);
+
+            if (_references != null)
+            {
+                connectionListener.SetReferences(_references);
+                _references.Put(reference.GetLocator(), reference.GetComponent());
+            }
+            else
+            {
+                _references = References.FromTuples(reference.GetLocator(), reference.GetComponent());
+            }
+
+            return connectionListener;
         }
 
         /// <summary>
@@ -177,12 +220,18 @@ namespace PipServices3.Kafka.Queues
             if (_connection == null)
             {
                 _connection = CreateConnection();
+                if (_listenConnection)
+                    _connectionListener = CreateConnectionListener();
+
                 _localConnection = true;
             }
 
             if (_localConnection)
             {
                 await _connection.OpenAsync(correlationId);
+
+                if (_listenConnection)
+                    await _connectionListener.OpenAsync(correlationId);
             }
 
             if (!_connection.IsOpen())
@@ -213,6 +262,9 @@ namespace PipServices3.Kafka.Queues
 
             if (_localConnection)
             {
+                if (_listenConnection)
+                    await _connectionListener.CloseAsync(correlationId);
+
                 await _connection.CloseAsync(correlationId);
             }
 
